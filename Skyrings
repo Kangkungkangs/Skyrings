@@ -1,0 +1,212 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local folder = workspace:WaitForChild("SkyRings")
+
+-- SETTINGS
+local RESPAWN_TIME = 20
+local COMBO_TIME = 10
+local TARGET_TIME = 2
+local ARRIVAL_MARGIN = 0.3
+local HEIGHT_OFFSET = 3
+
+local running = true
+local currentTween
+
+-- Cooldown individual setiap ring
+local cooldowns = {}
+
+-- GUI CONTROLLER
+local gui = Instance.new("ScreenGui")
+gui.Name = "SkyRingController"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+-- FUNGSI MEMBUAT TOMBOL
+local function createButton(name, text, position, color)
+    local button = Instance.new("TextButton")
+
+    button.Name = name
+    button.Size = UDim2.fromOffset(45, 40)
+    button.Position = position
+    button.Text = text
+    button.TextScaled = true
+    button.Font = Enum.Font.GothamBold
+    button.BackgroundColor3 = color
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Parent = gui
+
+    Instance.new("UICorner", button).CornerRadius =
+        UDim.new(0, 8)
+
+    return button
+end
+
+-- X1: HANYA HILANGKAN GUI
+local X1 = createButton(
+    "X1",
+    "X1",
+    UDim2.fromOffset(20, 100),
+    Color3.fromRGB(200, 40, 40)
+)
+
+-- X2: STOP SEMUA FUNGSI
+local X2 = createButton(
+    "X2",
+    "X2",
+    UDim2.fromOffset(75, 100),
+    Color3.fromRGB(35, 35, 35)
+)
+
+-- EVENT X1
+X1.MouseButton1Click:Connect(function()
+    gui:Destroy()
+
+    -- running tetap true
+    -- Tween tetap berjalan
+    -- Auto Route tetap aktif
+end)
+
+-- EVENT X2
+X2.MouseButton1Click:Connect(function()
+    running = false
+
+    if currentTween then
+        currentTween:Cancel()
+        currentTween = nil
+    end
+
+    gui:Destroy()
+
+    print("SkyRing Auto Route berhasil dihentikan!")
+end)
+
+-- IDENTITAS RING BERDASARKAN NAMA DAN POSISI
+local function getRingKey(ring)
+    local pos = ring:GetPivot().Position
+
+    return string.format(
+        "%s:%.0f:%.0f:%.0f",
+        ring.Name,
+        pos.X,
+        pos.Y,
+        pos.Z
+    )
+end
+
+-- MAIN LOOP
+while running do
+
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+
+    if not root then
+        task.wait(0.1)
+        continue
+    end
+
+    local now = os.clock()
+
+    local nearest
+    local nearestKey
+    local nearestDistance = math.huge
+    local bestArrival = math.huge
+
+    -- CARI RING DENGAN WAKTU KEDATANGAN TERBAIK
+    for _, ring in ipairs(folder:GetChildren()) do
+
+        if ring:IsA("Model") and ring.Parent then
+
+            local key = getRingKey(ring)
+
+            local remaining = math.max(
+                0,
+                (cooldowns[key] or 0) - now
+            )
+
+            local position = ring:GetPivot().Position
+            local distance = (position - root.Position).Magnitude
+
+            local arrivalTime = math.max(
+                TARGET_TIME,
+                remaining + ARRIVAL_MARGIN
+            )
+
+            if arrivalTime < bestArrival
+                or (
+                    arrivalTime == bestArrival
+                    and distance < nearestDistance
+                ) then
+
+                bestArrival = arrivalTime
+                nearestDistance = distance
+                nearest = ring
+                nearestKey = key
+
+            end
+        end
+    end
+
+    if not nearest then
+        task.wait(0.1)
+        continue
+    end
+
+    -- TARGET POSISI
+    local target = nearest:GetPivot().Position
+        + Vector3.new(0, HEIGHT_OFFSET, 0)
+
+    local distance = (target - root.Position).Magnitude
+
+    -- KECEPATAN OTOMATIS
+    local duration = math.max(bestArrival, 0.1)
+    local speed = distance / duration
+
+    print(
+        "Target:", nearest.Name,
+        "| Distance:", math.floor(distance),
+        "| Speed:", math.floor(speed),
+        "| Arrival:", string.format("%.2f", duration)
+    )
+
+    -- SMOOTH TWEEN
+    currentTween = TweenService:Create(
+        root,
+        TweenInfo.new(
+            duration,
+            Enum.EasingStyle.Linear,
+            Enum.EasingDirection.Out
+        ),
+        {
+            CFrame = CFrame.new(target)
+        }
+    )
+
+    currentTween:Play()
+
+    local result = currentTween.Completed:Wait()
+
+    currentTween = nil
+
+    if not running then
+        break
+    end
+
+    -- COOLDOWN RING
+    if result == Enum.PlaybackState.Completed then
+        cooldowns[nearestKey] = os.clock() + RESPAWN_TIME
+    end
+
+end
+
+-- CLEANUP
+if currentTween then
+    currentTween:Cancel()
+end
+
+if gui.Parent then
+    gui:Destroy()
+end
+
+print("SkyRing Auto Route stopped!")
